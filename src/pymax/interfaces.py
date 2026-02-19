@@ -295,16 +295,18 @@ class BaseTransport(ClientProtocol):
         cmd = data.get("cmd")
         opcode = data.get("opcode")
 
-        if cmd != expected_cmd:
+        is_error_response = cmd == 3
+
+        if not is_error_response and cmd != expected_cmd:
             return False
 
-        if expected_opcode is not None and opcode != expected_opcode:
+        if not is_error_response and expected_opcode is not None and opcode != expected_opcode:
             return False
 
         if not fut.done():
             fut.set_result(data)
 
-        self.logger.debug("Matched response for pending seq=%s", seq)
+        self.logger.debug("Matched response for pending seq=%s (cmd=%s)", seq, cmd)
         return True
 
     async def _handle_incoming_queue(self, data: dict[str, Any]) -> None:

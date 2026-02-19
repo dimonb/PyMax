@@ -273,8 +273,8 @@ Socket connections may be unstable, SSL issues are possible.
             self.logger.error("SSL handshake timeout")
             raise
 
-        for fut in list(self._pending.values()):
-            old_fut = fut[0]
+        for pending in list(self._pending.values()):
+            old_fut = pending[0] if isinstance(pending, tuple) else pending
             if not old_fut.done():
                 old_fut.set_exception(SocketNotConnectedError())
         self._pending.clear()
@@ -291,7 +291,6 @@ Socket connections may be unstable, SSL issues are possible.
             except Exception:
                 self.logger.debug("Old recv_task cancellation raised", exc_info=True)
 
-        self.logger.debug("Old recv_task cancellation raised", exc_info=True)
         self._recv_task = self._create_safe_task(self._recv_loop(), name="recv_loop socket task")
         self._recv_task.add_done_callback(
             lambda t: self.logger.debug(
@@ -471,11 +470,13 @@ Socket connections may be unstable, SSL issues are possible.
         fut: asyncio.Future[dict[str, Any]] = loop.create_future()
         seq_key = msg["seq"]
 
-        old_fut = self._pending.get(seq_key)
-        if old_fut and not old_fut.done():
-            old_fut.cancel()
+        old_pending = self._pending.get(seq_key)
+        if old_pending:
+            old_fut = old_pending[0] if isinstance(old_pending, tuple) else old_pending
+            if not old_fut.done():
+                old_fut.cancel()
 
-        self._pending[seq_key] = fut
+        self._pending[seq_key] = (fut, 1, int(opcode))
         try:
             self.logger.debug(
                 "Sending frame msg=%s",
