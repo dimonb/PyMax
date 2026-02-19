@@ -36,8 +36,8 @@ class WebSocketMixin(BaseTransport):
         :return: Результат handshake.
         :rtype: dict[str, Any] | None
         """
-        if user_agent is None:
-            user_agent = UserAgentPayload()
+        if user_agent is None or self.headers is None:
+            user_agent = UserAgentPayload() or self.headers
 
         self.logger.info("Connecting to WebSocket %s", self.uri)
 
@@ -49,16 +49,36 @@ class WebSocketMixin(BaseTransport):
             self.uri,
             origin=WEBSOCKET_ORIGIN,
             user_agent_header=user_agent.header_user_agent,
+            compression="deflate",
+            ping_interval=None,
+            open_timeout=10,
+            close_timeout=10,
             proxy=self.proxy,
+            max_size=None,
         )
+
+        for fut in list(self._pending.values()):
+            old_fut = fut[0]
+            if not old_fut.done():
+                old_fut.set_exception(WebSocketNotConnectedError())
+        self._pending.clear()
+
         self.is_connected = True
         self._incoming = asyncio.Queue()
         self._outgoing = asyncio.Queue()
         self._pending = {}
-        self._recv_task = asyncio.create_task(self._recv_loop())
-        self._outgoing_task = asyncio.create_task(self._outgoing_loop())
+        self._recv_task = self._create_safe_task(
+            self._recv_loop(), name="recv_loop websocket task"
+        )
+        self._outgoing_task = self._create_safe_task(
+            self._outgoing_loop(), name="outgoing_loop websocket task"
+        )
+        self.logger.debug("is_connected=%s before starting ping", self.is_connected)
+
         self.logger.info("WebSocket connected, starting handshake")
-        return await self._handshake(user_agent)
+        resp = await self._handshake(user_agent)
+
+        return resp
 
     async def _recv_loop(self) -> None:
         if self._ws is None:
@@ -69,6 +89,7 @@ class WebSocketMixin(BaseTransport):
         while True:
             try:
                 raw = await self._ws.recv()
+                self.logger.debug("RAW IN: %s", raw)
                 data = self._parse_json(raw)
 
                 if data is None:
@@ -82,12 +103,13 @@ class WebSocketMixin(BaseTransport):
                 await self._dispatch_incoming(data)
 
             except websockets.exceptions.ConnectionClosed as e:
-                self.logger.info(
+                self.logger.exception(
                     f"WebSocket connection closed with error: {e.code}, {e.reason}; exiting recv loop"
                 )
-                for fut in self._pending.values():
+                for pending in self._pending.values():
+                    fut = pending[0]
                     if not fut.done():
-                        fut.set_exception(WebSocketNotConnectedError)
+                        fut.set_exception(WebSocketNotConnectedError())
                 self._pending.clear()
 
                 self.is_connected = False
@@ -109,22 +131,23 @@ class WebSocketMixin(BaseTransport):
     ) -> dict[str, Any]:
         ws = self.ws
         msg = self._make_message(opcode, payload, cmd)
+
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[dict[str, Any]] = loop.create_future()
         seq_key = msg["seq"]
 
-        old_fut = self._pending.get(seq_key)
-        if old_fut and not old_fut.done():
-            old_fut.cancel()
+        old = self._pending.get(seq_key)
+        if old:
+            old_fut = old[0]
+            if not old_fut.done():
+                old_fut.cancel()
 
-        self._pending[seq_key] = fut
+        self._pending[seq_key] = (fut, 1, int(opcode))
 
         try:
             self.logger.debug(
-                "Sending frame opcode=%s cmd=%s seq=%s",
-                opcode,
-                cmd,
-                msg["seq"],
+                "Sending frame msg=%s",
+                json.dumps(msg, ensure_ascii=False, indent=4),
             )
             await ws.send(json.dumps(msg))
             data = await asyncio.wait_for(fut, timeout=timeout)
@@ -137,9 +160,11 @@ class WebSocketMixin(BaseTransport):
         except asyncio.TimeoutError:
             self.logger.exception("Send and wait failed (opcode=%s, seq=%s)", opcode, msg["seq"])
             raise RuntimeError("Send and wait failed")
-        except Exception:
-            self.logger.exception("Send and wait failed (opcode=%s, seq=%s)", opcode, msg["seq"])
-            raise RuntimeError("Send and wait failed")
+        except Exception as e:
+            self.logger.exception(
+                f"Send and wait failed with exception {e}(opcode=%s, seq=%s)", opcode, msg["seq"]
+            )
+            raise RuntimeError(f"Send and wait failed with exception {e}")
         finally:
             self._pending.pop(seq_key, None)
 
@@ -149,3 +174,9 @@ class WebSocketMixin(BaseTransport):
             if chat.id == chat_id:
                 return chat
         return None
+
+    async def _send_only(self, opcode: Opcode, payload: dict[str, Any], cmd: int = 0) -> None:
+        msg = self._make_message(opcode, payload, cmd)
+        packet = json.dumps(msg)
+
+        asyncio.create_task(self.ws.send(packet))

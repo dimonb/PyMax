@@ -49,7 +49,19 @@ class BaseClient(ClientProtocol):
         try:
             return await coro
         except Exception as e:
-            self.logger.error(f"Unhandled exception in {context}: {e}\n{traceback.format_exc()}")
+            if self._on_error_handler:
+                try:
+                    result = self._on_error_handler(e)
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception as eh:
+                    self.logger.exception(
+                        f"Error in on_error_handler while handling exception in {context}: {eh}\n{traceback.format_exc()}"
+                    )
+            else:
+                self.logger.exception(
+                    f"Unhandled exception in {context}: {e}\n{traceback.format_exc()}"
+                )
 
     def _create_safe_task(
         self, coro: Awaitable[Any], name: str | None = None
@@ -60,9 +72,20 @@ class BaseClient(ClientProtocol):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                tb = traceback.format_exc()
-                self.logger.error(f"Unhandled exception in task {name or coro}: {e}\n{tb}")
-                raise
+                if self._on_error_handler:
+                    try:
+                        result = self._on_error_handler(e)
+                        if asyncio.iscoroutine(result):
+                            await result
+                    except Exception as eh:
+                        tb = traceback.format_exc()
+                        self.logger.exception(
+                            f"Error in on_error_handler while handling exception in task {name or coro}: {eh}\n{tb}"
+                        )
+                else:
+                    tb = traceback.format_exc()
+                    self.logger.exception(f"Unhandled exception in task {name or coro}: {e}\n{tb}")
+                    raise
 
         task = asyncio.create_task(runner(), name=name)
         self._background_tasks.add(task)
@@ -91,10 +114,11 @@ class BaseClient(ClientProtocol):
                 await self._outgoing_task
             self._outgoing_task = None
 
-        for fut in self._pending.values():
-            if not fut.done():
-                fut.set_exception(WebSocketNotConnectedError())
-        self._pending.clear()
+            for pending in self._pending.values():
+                fut = pending[0]
+                if not fut.done():
+                    fut.set_exception(WebSocketNotConnectedError())
+            self._pending.clear()
 
         if self._ws:
             try:
@@ -191,7 +215,7 @@ class BaseTransport(ClientProtocol):
             ver=11,
             cmd=cmd,
             seq=self._seq,
-            opcode=opcode.value,
+            opcode=opcode,
             payload=payload,
         ).model_dump(by_alias=True)
 
@@ -210,8 +234,10 @@ class BaseTransport(ClientProtocol):
             except SocketNotConnectedError:
                 self.logger.debug("Socket disconnected, exiting ping loop")
                 break
-            except Exception:
-                self.logger.warning("Interactive ping failed")
+            except Exception as e:
+                self.logger.debug("Interactive ping failed: %s", e)
+                if not self.is_connected:
+                    break
             await asyncio.sleep(DEFAULT_PING_INTERVAL)
 
     async def _handshake(self, user_agent: UserAgentPayload) -> dict[str, Any]:
@@ -256,14 +282,30 @@ class BaseTransport(ClientProtocol):
             self.logger.warning("JSON parse error", exc_info=True)
             return None
 
-    def _handle_pending(self, seq: int | None, data: dict) -> bool:
-        if isinstance(seq, int):
-            fut = self._pending.get(seq)
-            if fut and not fut.done():
-                fut.set_result(data)
-                self.logger.debug("Matched response for pending seq=%s", seq)
-                return True
-        return False
+    def _handle_pending(self, seq: int | None, data: dict[str, Any]) -> bool:
+        if seq is None:
+            return False
+
+        pending = self._pending.get(seq)
+        if not pending:
+            return False
+
+        fut, expected_cmd, expected_opcode = pending
+
+        cmd = data.get("cmd")
+        opcode = data.get("opcode")
+
+        if cmd != expected_cmd:
+            return False
+
+        if expected_opcode is not None and opcode != expected_opcode:
+            return False
+
+        if not fut.done():
+            fut.set_result(data)
+
+        self.logger.debug("Matched response for pending seq=%s", seq)
+        return True
 
     async def _handle_incoming_queue(self, data: dict[str, Any]) -> None:
         if self._incoming:
@@ -286,18 +328,6 @@ class BaseTransport(ClientProtocol):
                     fut.set_result(data)
                     self.logger.debug("Fulfilled file upload waiter for %s=%s", key, id_)
 
-    async def _send_notification_response(self, chat_id: int, message_id: str) -> None:
-        if self._socket is not None and self.is_connected:
-            return
-        await self._send_and_wait(
-            opcode=Opcode.NOTIF_MESSAGE,
-            payload={"chatId": chat_id, "messageId": message_id},
-            cmd=0,
-        )
-        self.logger.debug(
-            "Sent NOTIF_MESSAGE_RECEIVED for chat_id=%s message_id=%s", chat_id, message_id
-        )
-
     async def _handle_message_notifications(self, data: dict) -> None:
         if data.get("opcode") != Opcode.NOTIF_MESSAGE.value:
             return
@@ -305,9 +335,6 @@ class BaseTransport(ClientProtocol):
         msg = Message.from_dict(payload)
         if not msg:
             return
-
-        if msg.chat_id and msg.id:
-            await self._send_notification_response(msg.chat_id, str(msg.id))
 
         handlers_map = {
             MessageStatus.EDITED: self._on_message_edit_handlers,
@@ -494,7 +521,7 @@ class BaseTransport(ClientProtocol):
     async def _sync(self, user_agent: UserAgentPayload | None = None) -> None:
         self.logger.info("Starting initial sync")
 
-        if user_agent is None:
+        if user_agent is None or self.headers is None:
             user_agent = self.headers or UserAgentPayload()
 
         payload = SyncPayload(
@@ -502,17 +529,26 @@ class BaseTransport(ClientProtocol):
             token=self._token,
             chats_sync=0,
             contacts_sync=0,
-            presence_sync=0,
+            presence_sync=-1,
             drafts_sync=0,
             chats_count=40,
             user_agent=user_agent,
-        ).model_dump(by_alias=True)
+        ).model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
         try:
             data = await self._send_and_wait(opcode=Opcode.LOGIN, payload=payload)
             raw_payload = data.get("payload", {})
 
             if error := raw_payload.get("error"):
                 MixinsUtils.handle_error(data)
+
+            ping_task = self._create_safe_task(
+                self._send_interactive_ping(),
+                name="interactive_ping",
+            )
+
+            chat_marker = raw_payload.get("chatMarker")
+            if chat_marker:
+                self.chat_marker = chat_marker
 
             for raw_chat in raw_payload.get("chats", []):
                 try:
@@ -544,7 +580,7 @@ class BaseTransport(ClientProtocol):
             )
 
         except Exception as e:
-            self.logger.exception("Sync failed")
+            self.logger.exception("Sync failed with error: %s", e)
             self.is_connected = False
             if self._ws:
                 await self._ws.close()
