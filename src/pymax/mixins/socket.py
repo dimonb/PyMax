@@ -30,6 +30,7 @@ from pymax.types import (
 class SocketMixin(BaseTransport):
     MAX_UNCOMPRESSED_SIZE = 10 * 1024 * 1024
     MAX_PAYLOAD_LENGTH = 50 * 1024 * 1024
+    _sock_read_lock: asyncio.Lock
 
     async def _close_socket(self):
         async with self._sock_lock:
@@ -283,6 +284,7 @@ Socket connections may be unstable, SSL issues are possible.
         self._incoming = asyncio.Queue()
         self._outgoing = asyncio.Queue()
         self._pending = {}
+        self._sock_read_lock = asyncio.Lock()
         if self._recv_task and not self._recv_task.done():
             try:
                 self._recv_task.cancel()
@@ -325,7 +327,7 @@ Socket connections may be unstable, SSL issues are possible.
         return bytes(data)
 
     async def _parse_header(self, loop, sock):
-        async with self._sock_lock:
+        async with self._sock_read_lock:
             header = await loop.run_in_executor(None, lambda: self._ssl_read_exactly(sock, 10))
         return header
 
@@ -336,7 +338,7 @@ Socket connections may be unstable, SSL issues are possible.
         if payload_length == 0:
             raw = header
         else:
-            async with self._sock_lock:
+            async with self._sock_read_lock:
                 payload = await loop.run_in_executor(
                     None, lambda: self._ssl_read_exactly(sock, payload_length)
                 )
