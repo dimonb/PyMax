@@ -66,16 +66,26 @@ class SocketMixin(BaseTransport):
         payload = None
         if payload_bytes:
             if comp_flag != 0:
-                # TODO: надо выяснить правильный размер распаковки
-                # uncompressed_size = int.from_bytes(payload_bytes[0:4], "big")
-                compressed_data = payload_bytes
-                try:
-                    payload_bytes = lz4.block.decompress(
-                        compressed_data,
-                        uncompressed_size=99999,
-                    )
-                except lz4.block.LZ4BlockError:
-                    return None
+                decompressed = None
+                if len(payload_bytes) > 4:
+                    orig_size = int.from_bytes(payload_bytes[0:4], "big")
+                    if 0 < orig_size <= 50_000_000:
+                        try:
+                            decompressed = lz4.block.decompress(
+                                payload_bytes[4:],
+                                uncompressed_size=orig_size,
+                            )
+                        except lz4.block.LZ4BlockError:
+                            pass
+                if decompressed is None:
+                    try:
+                        decompressed = lz4.block.decompress(
+                            payload_bytes,
+                            uncompressed_size=max(len(payload_bytes) * 10, 1_000_000),
+                        )
+                    except lz4.block.LZ4BlockError:
+                        return None
+                payload_bytes = decompressed
             payload = msgpack.unpackb(payload_bytes, raw=False, strict_map_key=False)
 
         return {
