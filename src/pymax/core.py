@@ -180,16 +180,10 @@ class MaxClient(ApiMixin, WebSocketMixin, BaseClient):
         self._scheduled_tasks: list[tuple[Callable[[], Any | Awaitable[Any]], float]] = []
 
         self._ssl_context = ssl.create_default_context()
-        self._ssl_context.set_ciphers(
-            "DEFAULT:!aNULL:!eNULL:!MD5:!3DES:!DES:!RC4:!IDEA:!SEED:!aDSS:!SRP:!PSK"
-        )
         self._ssl_context.check_hostname = True
         self._ssl_context.verify_mode = ssl.CERT_REQUIRED
         self._ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-
-        self._ssl_context.session_stats()
-        self._ssl_context.load_default_certs()
-        self._ssl_context.set_ciphers("DEFAULT")
+        self._ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
         self._socket: socket.socket | None = None
         self._ws: websockets.ClientConnection | None = None
 
