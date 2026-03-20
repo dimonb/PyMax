@@ -571,8 +571,16 @@ class BaseTransport(ClientProtocol):
                 except Exception:
                     self.logger.exception("Error parsing contact entry")
 
-            if raw_payload.get("profile", {}).get("contact"):
-                self.me = Me.from_dict(raw_payload.get("profile", {}).get("contact", {}))
+            profile = raw_payload.get("profile") or {}
+            contact = profile.get("contact") or profile
+            if contact.get("id"):
+                self.me = Me.from_dict(contact)
+            else:
+                self.logger.warning(
+                    "No usable profile data in LOGIN response — self.me will be None. "
+                    "Profile keys: %s",
+                    list(profile.keys()),
+                )
 
             self.logger.info(
                 "Sync completed: dialogs=%d chats=%d channels=%d",
