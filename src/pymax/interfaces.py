@@ -44,6 +44,7 @@ class BaseClient(ClientProtocol):
             )
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
+            self.logger.propagate = False
 
     async def _safe_execute(self, coro, *, context: str = "unknown") -> Any:
         try:
