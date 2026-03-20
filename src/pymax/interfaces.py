@@ -531,16 +531,19 @@ class BaseTransport(ClientProtocol):
         if user_agent is None or self.headers is None:
             user_agent = self.headers or UserAgentPayload()
 
+        saved_marker = self._database.get_chat_marker()
         payload = SyncPayload(
             interactive=True,
             token=self._token,
-            chats_sync=0,
+            chats_sync=saved_marker or 0,
             contacts_sync=0,
             presence_sync=-1,
             drafts_sync=0,
             chats_count=40,
             user_agent=user_agent,
         ).model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
+        if saved_marker:
+            self.logger.info("Resuming from chatMarker=%d", saved_marker)
         try:
             data = await self._send_and_wait(opcode=Opcode.LOGIN, payload=payload)
             raw_payload = data.get("payload", {})
@@ -553,9 +556,12 @@ class BaseTransport(ClientProtocol):
                 name="interactive_ping",
             )
 
-            chat_marker = raw_payload.get("chatMarker")
-            if chat_marker:
-                self.chat_marker = chat_marker
+            # chatMarker is always 0; the server uses "time" as the sync cursor.
+            # Storing it lets us request missed messages on reconnect via chats_sync.
+            server_time = raw_payload.get("time")
+            if server_time:
+                self.chat_marker = server_time
+                self._database.update_chat_marker(server_time)
 
             for raw_chat in raw_payload.get("chats", []):
                 try:

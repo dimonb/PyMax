@@ -2,6 +2,7 @@ from typing import cast
 from uuid import UUID
 
 from sqlalchemy.engine.base import Engine
+from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from .models import Auth
@@ -18,6 +19,13 @@ class Database:
 
     def create_all(self) -> None:
         SQLModel.metadata.create_all(self.engine)
+        # Migrate: add chat_marker column if the table pre-dates this field.
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE auth ADD COLUMN chat_marker INTEGER"))
+                conn.commit()
+        except Exception:
+            pass  # column already exists
 
     def get_engine(self, workdir: str, session_name: str) -> Engine:
         return create_engine(f"sqlite:///{workdir}/{session_name}")
@@ -72,6 +80,18 @@ class Database:
             session.add(new_auth)
             session.commit()
             session.refresh(new_auth)
+
+    def get_chat_marker(self) -> int | None:
+        with self.get_session() as session:
+            return cast(int | None, session.exec(select(Auth.chat_marker)).first())
+
+    def update_chat_marker(self, marker: int) -> None:
+        with self.get_session() as session:
+            auth = session.exec(select(Auth)).first()
+            if auth:
+                auth.chat_marker = marker
+                session.add(auth)
+                session.commit()
 
     def update(self, auth: Auth) -> Auth:
         with self.get_session() as session:
