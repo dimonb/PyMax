@@ -98,7 +98,7 @@ class SyncPayload(CamelModel):
 
 class ReplyLink(CamelModel):
     type: str = "REPLY"
-    message_id: str
+    message_id: int
 
 
 class UploadPayload(CamelModel):

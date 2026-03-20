@@ -406,7 +406,7 @@ class MessageMixin(ClientProtocol):
                 cid=int(time.time() * 1000),
                 elements=elements,
                 attaches=attaches,
-                link=(ReplyLink(message_id=str(reply_to)) if reply_to else None),
+                link=(ReplyLink(message_id=reply_to) if reply_to else None),
             ),
             notify=notify,
         ).model_dump(by_alias=True)
