@@ -35,6 +35,10 @@ from pymax.utils import MixinsUtils
 class BaseClient(ClientProtocol):
     def _setup_logger(self) -> None:
         if not self.logger.handlers:
+            if logging.getLogger().handlers:
+                # Host application has configured logging — let records propagate
+                # to root so all output uses the same format and handlers.
+                return
             if not self.logger.level:
                 self.logger.setLevel(logging.INFO)
             handler = logging.StreamHandler()
