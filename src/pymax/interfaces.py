@@ -355,6 +355,9 @@ class BaseTransport(ClientProtocol):
                 await self._process_message_handler(handler, filter, msg)
 
     async def _handle_reactions(self, data: dict):
+        if data.get("opcode") == Opcode.NOTIF_CHAT:
+            payload = data.get("payload", {})
+            self.logger.debug("NOTIF_CHAT payload keys: %s", list(payload.keys()) if payload else None)
         if data.get("opcode") != Opcode.NOTIF_MSG_REACTIONS_CHANGED:
             return
 

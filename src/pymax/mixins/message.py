@@ -760,7 +760,7 @@ class MessageMixin(ClientProtocol):
             if data.get("payload", {}).get("error"):
                 MixinsUtils.handle_error(data)
 
-            self.logger.debug("add_reaction success")
+            self.logger.debug("add_reaction success, response payload: %s", data.get("payload"))
             return (
                 ReactionInfo.from_dict(data["payload"]["reactionInfo"])
                 if data.get("payload")
