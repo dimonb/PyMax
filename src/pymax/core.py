@@ -347,9 +347,9 @@ class MaxClient(ApiMixin, WebSocketMixin, BaseClient):
                 self.logger.info("Client task cancelled, stopping")
                 break
             except Exception:
+                self.logger.exception("Client start iteration failed")
                 if not self.reconnect:
-                    self.logger.exception("Client start iteration failed, no reconnect configured")
-                raise
+                    raise
             finally:
                 await self._cleanup_client()
 
