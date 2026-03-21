@@ -355,10 +355,30 @@ class BaseTransport(ClientProtocol):
                 await self._process_message_handler(handler, filter, msg)
 
     async def _handle_reactions(self, data: dict):
-        if data.get("opcode") == Opcode.NOTIF_CHAT:
+        opcode = data.get("opcode")
+
+        if opcode == Opcode.NOTIF_CHAT:
             payload = data.get("payload", {})
-            self.logger.debug("NOTIF_CHAT payload: %s", payload)
-        if data.get("opcode") != Opcode.NOTIF_MSG_REACTIONS_CHANGED:
+            chat_data = payload.get("chat", {})
+            message_id = chat_data.get("lastReactedMessageId")
+            last_reaction = chat_data.get("lastReaction")
+            chat_id = chat_data.get("id")
+            if message_id and last_reaction and chat_id:
+                reaction_info = ReactionInfo(
+                    total_count=None,
+                    your_reaction=None,
+                    counters=[ReactionCounter(reaction=last_reaction, count=1)],
+                )
+                for handler in self._on_reaction_change_handlers:
+                    try:
+                        result = handler(message_id, chat_id, reaction_info)
+                        if asyncio.iscoroutine(result):
+                            await result
+                    except Exception as e:
+                        self.logger.exception("Error in on_reaction_change_handler: %s", e)
+            return
+
+        if opcode != Opcode.NOTIF_MSG_REACTIONS_CHANGED:
             return
 
         payload = data.get("payload", {})
