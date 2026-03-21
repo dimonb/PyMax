@@ -363,6 +363,10 @@ class BaseTransport(ClientProtocol):
             message_id = chat_data.get("lastReactedMessageId")
             last_reaction = chat_data.get("lastReaction")
             chat_id = chat_data.get("id")
+            self.logger.debug(
+                "NOTIF_CHAT reaction fields: chat_id=%s message_id=%s last_reaction=%r",
+                chat_id, message_id, last_reaction,
+            )
             if message_id and chat_id:
                 counters = [ReactionCounter(reaction=last_reaction, count=1)] if last_reaction else []
                 reaction_info = ReactionInfo(
