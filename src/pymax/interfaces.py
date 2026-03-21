@@ -369,11 +369,11 @@ class BaseTransport(ClientProtocol):
             )
             if chat_id:
                 if message_id and last_reaction:
-                    # reaction set — cache and forward
+                    # reaction set — cache message_id and forward
                     self._last_reacted_message_id[chat_id] = message_id
                     counters = [ReactionCounter(reaction=last_reaction, count=1)]
                 elif not message_id:
-                    # reaction removed — server doesn't tell us which message; use cache
+                    # reaction removed — Max doesn't include message_id; use cached value
                     message_id = self._last_reacted_message_id.pop(chat_id, None)
                     counters = []
                 else:
