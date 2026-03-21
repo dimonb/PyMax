@@ -300,7 +300,7 @@ class ReactionInfoPayload(CamelModel):
 
 class AddReactionPayload(CamelModel):
     chat_id: int
-    message_id: str
+    message_id: int
     reaction: ReactionInfoPayload
 
 
@@ -311,7 +311,7 @@ class GetReactionsPayload(CamelModel):
 
 class RemoveReactionPayload(CamelModel):
     chat_id: int
-    message_id: str
+    message_id: int
 
 
 class ReworkInviteLinkPayload(CamelModel):

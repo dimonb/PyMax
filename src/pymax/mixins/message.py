@@ -726,7 +726,7 @@ class MessageMixin(ClientProtocol):
     async def add_reaction(
         self,
         chat_id: int,
-        message_id: str,
+        message_id: int,
         reaction: str,
     ) -> ReactionInfo | None:
         """
@@ -808,7 +808,7 @@ class MessageMixin(ClientProtocol):
     async def remove_reaction(
         self,
         chat_id: int,
-        message_id: str,
+        message_id: int,
     ) -> ReactionInfo | None:
         """
         Удаляет реакцию с сообщения.
