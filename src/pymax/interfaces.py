@@ -364,8 +364,8 @@ class BaseTransport(ClientProtocol):
             last_reaction = chat_data.get("lastReaction")
             chat_id = chat_data.get("id")
             self.logger.debug(
-                "NOTIF_CHAT reaction fields: chat_id=%s message_id=%s last_reaction=%r full_chat=%s",
-                chat_id, message_id, last_reaction, chat_data,
+                "NOTIF_CHAT reaction fields: chat_id=%s message_id=%s last_reaction=%r full_data=%s",
+                chat_id, message_id, last_reaction, data,
             )
             if chat_id:
                 if message_id and last_reaction:
