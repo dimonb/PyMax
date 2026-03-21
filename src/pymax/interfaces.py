@@ -363,11 +363,12 @@ class BaseTransport(ClientProtocol):
             message_id = chat_data.get("lastReactedMessageId")
             last_reaction = chat_data.get("lastReaction")
             chat_id = chat_data.get("id")
-            if message_id and last_reaction and chat_id:
+            if message_id and chat_id:
+                counters = [ReactionCounter(reaction=last_reaction, count=1)] if last_reaction else []
                 reaction_info = ReactionInfo(
                     total_count=None,
                     your_reaction=None,
-                    counters=[ReactionCounter(reaction=last_reaction, count=1)],
+                    counters=counters,
                 )
                 for handler in self._on_reaction_change_handlers:
                     try:
