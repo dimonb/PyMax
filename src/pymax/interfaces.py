@@ -364,23 +364,34 @@ class BaseTransport(ClientProtocol):
             last_reaction = chat_data.get("lastReaction")
             chat_id = chat_data.get("id")
             self.logger.debug(
-                "NOTIF_CHAT reaction fields: chat_id=%s message_id=%s last_reaction=%r",
-                chat_id, message_id, last_reaction,
+                "NOTIF_CHAT reaction fields: chat_id=%s message_id=%s last_reaction=%r full_chat=%s",
+                chat_id, message_id, last_reaction, chat_data,
             )
-            if message_id and chat_id:
-                counters = [ReactionCounter(reaction=last_reaction, count=1)] if last_reaction else []
-                reaction_info = ReactionInfo(
-                    total_count=None,
-                    your_reaction=None,
-                    counters=counters,
-                )
-                for handler in self._on_reaction_change_handlers:
-                    try:
-                        result = handler(message_id, chat_id, reaction_info)
-                        if asyncio.iscoroutine(result):
-                            await result
-                    except Exception as e:
-                        self.logger.exception("Error in on_reaction_change_handler: %s", e)
+            if chat_id:
+                if message_id and last_reaction:
+                    # reaction set — cache and forward
+                    self._last_reacted_message_id[chat_id] = message_id
+                    counters = [ReactionCounter(reaction=last_reaction, count=1)]
+                elif not message_id:
+                    # reaction removed — server doesn't tell us which message; use cache
+                    message_id = self._last_reacted_message_id.pop(chat_id, None)
+                    counters = []
+                else:
+                    counters = []
+
+                if message_id:
+                    reaction_info = ReactionInfo(
+                        total_count=None,
+                        your_reaction=None,
+                        counters=counters,
+                    )
+                    for handler in self._on_reaction_change_handlers:
+                        try:
+                            result = handler(message_id, chat_id, reaction_info)
+                            if asyncio.iscoroutine(result):
+                                await result
+                        except Exception as e:
+                            self.logger.exception("Error in on_reaction_change_handler: %s", e)
             return
 
         if opcode != Opcode.NOTIF_MSG_REACTIONS_CHANGED:
