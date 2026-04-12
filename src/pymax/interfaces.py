@@ -214,7 +214,7 @@ class BaseTransport(ClientProtocol):
     def _make_message(
         self, opcode: Opcode, payload: dict[str, Any], cmd: int = 0
     ) -> dict[str, Any]:
-        self._seq += 1
+        self._seq = (self._seq + 1) % 0x10000
 
         msg = BaseWebSocketMessage(
             ver=11,
